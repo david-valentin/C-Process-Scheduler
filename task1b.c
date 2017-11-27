@@ -64,7 +64,6 @@ void computeAvgs(struct process *headRef, struct timeval start, struct timeval e
   long int turnaroundTime;
   long int responseTime;
 
-
   while (current != NULL) {
     headRef = headRef->oNext;
 
@@ -84,7 +83,7 @@ void computeAvgs(struct process *headRef, struct timeval start, struct timeval e
       avgTurnAroundTime += turnaroundTime;
       // Need an else case because the process might try to stick it in before the beginning of the linked list
     } else {
-      printf("IT HERE \n");
+      printf("IT HIT HERE \n");
     }
   }
   avgTurnAroundTime = avgTurnAroundTime/NUMBER_OF_PROCESSES;
