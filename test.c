@@ -4,122 +4,241 @@
 #include <stdio.h>
 #include <stdbool.h>
 
-bool compareBurstTime(struct process *head, struct process *next);
 
-void print_list(struct process * head);
+//GLOBAL VARIABLE TAIL
+struct process* TAIL;
+bool ITERATED = false;
 
-struct process * addSJF(struct process* headRef, struct process* new_node);
+float avgResponseTime = 0.0;
+float avgTurnAroundTime = 0.0;
 
-void createLinkedList(struct process **head);
+void printList(struct process * head);
 
+bool checkNull(struct process *target, char *name);
+
+struct process * addRR(struct process *headRef, struct process *newNode);
+
+struct process * traverseList(struct process *headRef);
+
+struct process* removeProcess(struct process *headRef, struct process *newNode);
+
+struct process * computeAvgs(struct process *headRef, struct timeval start, struct timeval end);
 
 int main()
 {
-  // Set the head to null
   struct process *head = NULL;
 
   int i;
   for (i = 0; i < NUMBER_OF_PROCESSES; i++) {
-    // Generates a new process each time
-    struct process *next = generateProcess();
-    printf("The value of next is: %d\n", next->iBurstTime);
-    // adding values to the head and use insertion sort
-    head = addSJF(head, next, insertionSort);
+    // If its the last process being added than add the tail pointer to the newNode
+    struct process *newNode = generateProcess();
+    head = addRR(head, newNode);
   }
-  print_list(sorted_list);
-}
 
-/*
-  ADDSJF
-    args:
-    1. headRef => the head linkedlist that we intend to returns | NULL on first go
-    2. newNode => the next linkedlist item | NOT NULL on first go
-    3. addMethod => a pointer to an addMethod | can be insertionSort for SJF or RoundRobin
-*/
-struct process * addSJF(struct process *headRef, struct process *newNode, struct process * (*addMethod)(struct process *head)(struct process *next))
-{
   /*
-    if the headRef is null, we know:
-      newNode is the first item in the list
+    This for loop sets the iBurstTime for all the processes that we generated
+    from the previous for loop
   */
-  if (headRef == NULL) {
-    printf("%d\n", newNode->iBurstTime);
-    // Assign the oNext pointer to the NULL head value
-    newNode->oNext = *headRef;
-    *headRef = new_node;
-    return newNode;
-  } else {
-    return addMethod(headRef, newNode);
+  // struct process *temp;
+  // for(temp = head; temp != NULL; temp = temp->oNext) {
+  //   // Instantiate two timeval structs
+  //   struct timeval start, end;
+  //   // Generates a new process each time
+  //   computeAvgs(temp, start, end);
+  // }
+
+  // What Chris thinks should happen
+  while (head != NULL) {
+    struct timeval start, end;
+
+  // computeAvgs should return the new head (note it may just be the same head)
+    head = computeAvgs(head, start, end);
   }
+
+  // Calculated at the end of the loop
+  avgTurnAroundTime = avgTurnAroundTime/NUMBER_OF_PROCESSES;
+  avgResponseTime = avgResponseTime/NUMBER_OF_PROCESSES;
+  printf("Average response time = %f \n", avgResponseTime);
+  printf("Average turn around time = %f \n", avgTurnAroundTime);
+
 }
 
 /*
-  Desc:
-    Conducts the insertion sort on the struct process headRef
-  Args:
-    1. headRef is the process reference that we are looking at addShortFirst
-    2. newNode is the process that we are adding to the head
-
-  Cases:
-    1. if the head->oNext process is null we know:
-      * that we need to compare the newNode to head => compareBurstTime();
-      * if compareBurstTime() => true
-
+  This function computes:
+    1. the avgTurnAroundTime and the avgResponseTime for the
+  all the processes in headRef
+    2. Print out the turn around time and the avgResponseTime for each process
+    depending on the order
 */
-struct process * insertionSort(struct process *headRef, struct process *newNode) {
+struct process * computeAvgs(struct process *headRef, struct timeval start, struct timeval end)
+{
+  //response time: amount of time it takes from when a request is submitted to when the response is produced (minimize); does not include the time for a response to be output
+  // turnaround time (TA): total amount of time to execute a particular process (minimize)
+  // Turnaroudn time = 0TimeCreated +
+  // | *oTimeCreated ------ | *oStartTime ---cpu_usage--- | *endProcess = Turnaround time
+  // Response time
+  // | *oTimeCreated ------- | *oStartTime
 
+
+  // The linkedlist is updated
+  struct process *current = headRef;
+  struct process *temp;
+  int previousBurstime;
+  float turnaroundTime = 0.0;
+  float responseTime = 0.0;
+
+  while (current != NULL) {
+    temp = current->oNext;
+
+    previousBurstime = current->iBurstTime;
+    /*
+      This is an external function in coursework.c that simulates a process being
+    scheduled and takes a timeval structs which generates times for the process.
+    */
+    simulateRoundRobinProcess(current, &start, &end);
+
+    // This is called to simply calculate the turnaroundTime time
+    turnaroundTime = getDifferenceInMilliSeconds(current->oTimeCreated, end);
+
+    // This is called to simply calculate the responseTime time
+    responseTime = getDifferenceInMilliSeconds(current->oTimeCreated, start);
+
+    // Always print this
+    printf("Process Id = %d, Previous Burst Time = %d, New Burst Time = %d, ", current->iProcessId, previousBurstime, current->iBurstTime);
+
+    // This is called to simply calculate the turnaroundTime time
+    turnaroundTime = getDifferenceInMilliSeconds(current->oTimeCreated, end);
+
+    // This is called to simply calculate the responseTime time
+    responseTime = getDifferenceInMilliSeconds(current->oTimeCreated, start);
+
+    // Always print this
+    printf("Process Id = %d, Previous Burst Time = %d, New Burst Time = %d", current->iProcessId, previousBurstime, current->iBurstTime);
+    if (ITERATED == false) {
+      printf(", Response Time = %f", responseTime);
+      avgResponseTime += responseTime;
+    }
+    if (current->iState == FINISHED) {
+      printf(", Turn Around Time = %f", turnaroundTime);
+      avgTurnAroundTime += turnaroundTime;
+      headRef = removeProcess(headRef, current);
+    }
+    printf("\n");
+    current = temp;
+  }
+  ITERATED = true;
+  return headRef;
+}
+
+/*
+  addRR
+    args:
+    1. headRef => the head linkedlist that we intend to returns | NULL on iteration
+    2. newNode => the next linkedlist item | NOT NULL on iteration
+*/
+struct process * addRR(struct process *headRef, struct process *newNode)
+{
   // This will hold our current reference
   struct process *current;
+  //Should never be the case, but just in case
+  if (newNode == NULL) return headRef;
 
-  // TRUE IF: the head ref iBurstTime is bigger than the newNode iBurstTime
-  if (compareBurstTime(headRef, newNode))
-  {
-    newNode->oNext = *headRef;
-    *headRef = new_node;
+  if (headRef == NULL) { // list is empty
+      headRef = newNode;
+      TAIL = newNode;
+      return headRef;
   } else
   {
-    current = headRef;
-    // if the current->oNext value isn't NULL and current/headRef->iBurstTime > newNode
-    while (current->oNext != NULL && compareBurstTime(current, newNode))
-    {
-      current = current->oNext;
-    }
-    // Break out of the loop status:
     /*
-      current = 7
-      current->oNext = 10;
-      newNode = 9
-      newNode->oNext = NULL;
-    */
+      Chris, the issue seems to be in here.
 
-    // Assign the next ref of newNode to
-    // the pointer after 9 will point to 10
-    newNode->oNext = current->oNext;
-    /*
-      current = 7
-      current->oNext = 10;
-      newNode = 9
-      newNode->oNext = 10;
+      Basically, tail->oNext segfaults and I think its because my TAIL doesn't have
+      anything to point to essentially.
+
+      tail = traverseList(headRef); returns NULL
+
+
     */
-    current->oNext = newNode;
+    TAIL = traverseList(headRef);
+    TAIL->oNext = newNode;
+    TAIL = newNode;
+    return headRef;
   }
-  // return the current linkedlist
-  return current;
-
 }
 
-bool compareBurstTime(struct process *head, struct process *next)
+/*
+  Function to traverse to the end of the list
+*/
+struct process * traverseList(struct process *headRef)
 {
-  return (head->iBurstTime > next->iBurstTime);
+  struct process *next = headRef;
+
+  while (next->oNext != NULL)
+  {
+    next = next->oNext;
+  }
+  // next will be null for some reason
+  return next;
 }
 
-void print_list(struct process * head) {
-    struct process * current = head;
+/*
+  A function to remove a process in the linkedlist
+*/
+struct process * removeProcess(struct process *headRef, struct process *oldNode)
+{
+  struct process *current = headRef;
 
-    while (current != NULL && current->oNext != NULL && current->oNext == current) {
-        printf("%d\n", current->iBurstTime);
-        current = current->oNext;
-        sleep(1);
+  // Case if our head is the intended node we wish to remove
+  if (headRef->iProcessId == oldNode->iProcessId)
+  {
+    struct process *newHeadRef = headRef->oNext;
+    free(headRef);
+    return newHeadRef;
+  }
+  /// if the tail->oNext is not null and the tail processId != oldNode processId
+  while (current->oNext != NULL)
+  {
+    // if the current->iProcessId equal the oldNode->iProcessId
+    // if its in the middle
+    if (current->oNext->iProcessId == oldNode->iProcessId)
+    {
+      struct process * targetNode = current->oNext;
+      // Reassign the next current
+      current->oNext = current->oNext->oNext;
+      //Changed it here
+      free(targetNode);
+      return headRef;
     }
+    current = current->oNext;
+  }
+  //Return headRef if all else if fails
+  return headRef;
+}
 
+/*
+  A util function to print out the list of processes
+*/
+void printList(struct process *head)
+{
+    struct process *temp = head;
+    while(temp != NULL)
+    {
+        printf("The value is: %d \n", temp->iBurstTime);
+        temp = temp->oNext;
+    }
+}
+
+/*
+  A util function to check if a process is null and print out the
+  associated name
+*/
+bool checkNull(struct process *target, char *name)
+{
+  if (target) {
+    printf("%s IS NOT NULL \n", name);
+    return true;
+  } else {
+    printf("%s IS NULL \n", name);
+    return false;
+  }
 }

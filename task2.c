@@ -1,55 +1,93 @@
-#include <stdlib.h>
-#include <sys/time.h>
 #include "coursework.h"
-#include <stdio.h>
+#include<stdio.h>
+#include<stdlib.h>
+#include<unistd.h>
+#include<pthread.h>
+#include<semaphore.h>
+#include<time.h>
 #include <stdbool.h>
 
-//GLOBAL VARIABLE TAIL
-struct process* TAIL;
-bool ITERATED = false;
 
+
+struct process *Bounded_Buffer_Head;
+// Semaphores for my bounded buffer - 1 to indicate full and 1 to indicate empty. Need a semaphore protectSem to
+sem_t fullSem;
+sem_t emptySem;
+sem_t protectSem;
+// Threads for producerTidand the consumer
+pthread_t producerTid;
+pthread_t consumerTid;
+// Variable to pass into the semaphore to indicate an empty variable
+int EMPTY = 0;
+// Number of iterations to run the process scheduling
+int ITERATIONS = 1000;
+// To keep track of the number of processes consumed and generated
+int NUM_CONSUMED = 0;
+int NUM_PRODUCED = 0;
+// Number of processes in the BUFFER => should never be more than BUFFER SIZE i.e. 5
+int BUFFER_COUNT = 0;
+// Keeps track whether we iterated through the Bounded Buffer the first time or not
+bool ITERATED = false;
+// TAIL of our list
+struct process* TAIL;
+// The max wait in case a process deadlocks
+struct timespec MAX_WAIT;
+// Float values to calculate the avg response time and avg turn around time
 float AvgResponseTime = 0.0;
 float AvgTurnAroundTime = 0.0;
 
+bool running = true;
+
+
+/*
+  Functions
+*/
+struct process * addSJF(struct process *headRef, struct process *newNode);
+
+struct process * removeProcess(struct process *headRef, struct process *oldNode);
+
+void * consumer(void *arg);
+
+void * producer(void *arg);
+
+bool initializeSemaphores();
+
+bool initializeConsumerProducer();
+
+void printList(struct process *head);
+
 struct process * computeAvgs(struct process *headRef, struct timeval start, struct timeval end);
 
-bool compareBurstTime(struct process *head, struct process *next);
 
-void printList(struct process * head);
-
-struct process* addSJF(struct process* headRef, struct process* newNode);
-
-struct process* removeProcess(struct process *headRef, struct process *newNode);
-
+// The producerTidcan only add processes to the buffer if spaces are available, the consumer can only remove processes from the buffer if processes are available. The producerTidand consumer must run in separate threads and with maximum parallelism.
 int main()
 {
-  // Set the head to null => this is a pointer which contains an address
-  // If I do *head
-  // *P = pointer reference to an address A
-  // p = changes p's memory
-  struct process *head = NULL;
 
-  int i;
-  for (i = 0; i < NUMBER_OF_PROCESSES; i++) {
-    // Generates a new process each time
-    struct process *newNode = generateProcess();
-    // adding values to the head and use insertion sort
-    head = addSJF(head, newNode);
-  }
+  MAX_WAIT.tv_sec = 1;
+  // Initialize sempahores
+  initializeSemaphores();
+  // Initialize the Consumer and producerTidthreads
+  initializeConsumerProducer();
 
-  while (head != NULL) {
+  // Set the bounded buffer to null
+  Bounded_Buffer_Head = NULL;
+
+
+  while (ITERATIONS > 0)
+  {
     struct timeval start, end;
-    // computeAvgs should return the new head (note it may just be the same head)
-    head = computeAvgs(head, start, end);
+    Bounded_Buffer_Head = computeAvgs(Bounded_Buffer_Head, start, end);
   }
 
-  // Calculated at the end of the loop
-  AvgTurnAroundTime = AvgTurnAroundTime/NUMBER_OF_PROCESSES;
-  AvgResponseTime = AvgResponseTime/NUMBER_OF_PROCESSES;
-  printf("Average response time = %f \n", AvgResponseTime);
-  printf("Average turn around time = %f \n", AvgTurnAroundTime);
+  // Bounded_Buffer_Head - should be organized by
+  // while there is space in the boundedBuffer
+  // Add a process
+  // Otherwise keep checking if the boundedBuffer has space available
 }
 
+/*
+  A function to output the text results
+*/
 /*
   This function computes:
     1. the AvgTurnAroundTime and the AvgResponseTime for the
@@ -66,7 +104,6 @@ struct process * computeAvgs(struct process *headRef, struct timeval start, stru
   // Response time
   // | *oTimeCreated ------- | *oStartTime
 
-
   // The linkedlist is updated
   struct process *current = headRef;
   struct process *temp;
@@ -76,29 +113,18 @@ struct process * computeAvgs(struct process *headRef, struct timeval start, stru
 
   while (current != NULL) {
     temp = current->oNext;
-
     previousBurstime = current->iBurstTime;
     /*
       This is an external function in coursework.c that simulates a process being
     scheduled and takes a timeval structs which generates times for the process.
     */
     simulateSJFProcess(current, &start, &end);
-
     // This is called to simply calculate the turnaroundTime time
     turnaroundTime = getDifferenceInMilliSeconds(current->oTimeCreated, end);
-
     // This is called to simply calculate the responseTime time
     responseTime = getDifferenceInMilliSeconds(current->oTimeCreated, start);
-
     // Always print this
     printf("Process Id = %d, Previous Burst Time = %d, New Burst Time = %d, ", current->iProcessId, previousBurstime, current->iBurstTime);
-
-    // This is called to simply calculate the turnaroundTime time
-    turnaroundTime = getDifferenceInMilliSeconds(current->oTimeCreated, end);
-
-    // This is called to simply calculate the responseTime time
-    responseTime = getDifferenceInMilliSeconds(current->oTimeCreated, start);
-
     // Always print this
     printf("Process Id = %d, Previous Burst Time = %d, New Burst Time = %d", current->iProcessId, previousBurstime, current->iBurstTime);
     if (ITERATED == false) {
@@ -109,6 +135,10 @@ struct process * computeAvgs(struct process *headRef, struct timeval start, stru
       printf(", Turn Around Time = %f", turnaroundTime);
       AvgTurnAroundTime += turnaroundTime;
       headRef = removeProcess(headRef, current);
+      // INCREMENT NUM_CONSUMED and BUFFER_COUNT
+      ++NUM_CONSUMED;
+      BUFFER_COUNT = NUM_PRODUCED - NUM_CONSUMED;
+      // Signal the emptySem and FullSem and Protect Sem that space is available
     }
     printf("\n");
     current = temp;
@@ -117,6 +147,94 @@ struct process * computeAvgs(struct process *headRef, struct timeval start, stru
   return headRef;
 }
 
+
+bool initializeSemaphores()
+{
+
+  if (sem_init(&fullSem, 0, BUFFER_SIZE) < 0)
+  {
+    printf("The full semaphore initialization failed. \n");
+    return false;
+  }
+
+  if (sem_init(&emptySem, 0, EMPTY) < 0)
+  {
+    printf("The empty semaphore initialization failed. \n");
+    return false;
+  }
+
+  if (sem_init(&protectSem, 0, BUFFER_SIZE) < 0)
+  {
+    printf("The protect count semaphore initialization failed. \n");
+    return false;
+  }
+  return true;
+}
+
+/*
+  Initialize the producerTid and consumers =>
+    returns true if initialized properly
+    returns false if initialized properly
+*/
+bool initializeConsumerProducer()
+{
+  if(pthread_create(&producerTid, NULL, &producer, NULL) != 0){
+    printf("\n Can't create the producer thread \n");
+    exit(1);
+    return false;
+  }
+  if(pthread_create(&consumerTid, NULL, &consumer, NULL)!= 0){
+      printf("\n Can't create the consumer thread\n");
+      pthread_join(producerTid,NULL);
+      running = 0;
+      exit(1);
+      return false;
+  }
+  return true;
+}
+
+
+/*
+  Initialize the producer
+*/
+void * producer(void *arg)
+{
+  printf("\n Starting Producer\n");
+  while(running){
+    struct process *newProcess = generateProcess();
+
+    if(sem_timedwait(&emptySem,&MAX_WAIT) == 0)
+    {
+        sem_wait(&protectSem);
+        // Sort by SJ
+        Bounded_Buffer_Head = addSJF(Bounded_Buffer_Head, newProcess);
+        NUM_PRODUCED++;
+        struct timeval start, end;
+        computeAvgs(Bounded_Buffer_Head, start, end);
+        sem_post(&protectSem);
+        sem_post(&fullSem);
+      }
+    }
+    printf("\n Stopping Producer\n");
+}
+
+/*
+  Initialize the consumer thread
+    - Where the simulateSJFProcess() is called
+*/
+void * consumer(void *arg)
+{
+  printf("\nStarting Consumer\n");
+  while(running){
+    if(sem_timedwait(&fullSem,&MAX_WAIT) == 0)
+    {
+        sem_wait(&protectSem);
+        sem_post(&protectSem);
+        sem_post(&emptySem);
+      }
+    }
+  printf("\nStopping Consumer\n");
+}
 
 /*
   ADDSJF
@@ -176,7 +294,7 @@ struct process * addSJF(struct process *headRef, struct process *newNode)
 }
 
 /*
-  A function to remove a process from a incoming headRef
+  A function to remove a node from a incoming headRef
 */
 struct process * removeProcess(struct process *headRef, struct process *oldNode)
 {
@@ -187,6 +305,8 @@ struct process * removeProcess(struct process *headRef, struct process *oldNode)
   {
     struct process *newHeadRef = headRef->oNext;
     free(headRef);
+    NUM_CONSUMED++;
+
     return newHeadRef;
   }
   /// if the tail->oNext is not null and the tail processId != oldNode processId
@@ -197,20 +317,14 @@ struct process * removeProcess(struct process *headRef, struct process *oldNode)
       struct process * targetNode = current->oNext;
       current->oNext = current->oNext->oNext;
       free(targetNode);
+      NUM_CONSUMED++;
       return headRef;
     }
     current = headRef->oNext;
   }
   //Return headRef if all else if fails
-  return headRef;
-}
 
-/*
-  A function to compare the iBurstTime of the headRef and the other struct process
-*/
-bool compareBurstTime(struct process *head, struct process *next)
-{
-    return (head->iBurstTime > next->iBurstTime);
+  return headRef;
 }
 
 /*
@@ -224,19 +338,4 @@ void printList(struct process *head)
         printf("The value is: %d \n", temp->iBurstTime);
         temp = temp->oNext;
     }
-}
-
-/*
-  A util function to check if a process is null and print out the
-  associated name
-*/
-bool checkNull(struct process *target, char *name)
-{
-  if (target) {
-    printf("%s IS NOT NULL \n", name);
-    return true;
-  } else {
-    printf("%s IS NULL \n", name);
-    return false;
-  }
 }

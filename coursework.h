@@ -13,7 +13,7 @@
 #define NUMBER_OF_CONSUMERS 5
 
 // maximum duration of the individual processes, in milli seconds. Note that the times themselves will be chosen at random in ]0,100]
-#define MAX_BURST_TIME 100 
+#define MAX_BURST_TIME 100
 
 // defines the number of event queues for task 5
 #define NUMBER_OF_EVENT_TYPES 2
@@ -27,7 +27,7 @@
 #define BLOCKED 4
 #define FINISHED 5
 
-/* 
+/*
  * Definition of the structure containing the process characteristics. These should be sufficient for the full implementation of all tasks.
  */
 
@@ -49,4 +49,3 @@ void simulateBlockingRoundRobinProcess(struct process * oTemp, struct timeval * 
 void runProcess(int iBurstTime, struct timeval * oStartTime, struct timeval * oEndTime);
 int generateBurstTime(struct process * oTemp);
 int generateEventType();
-
